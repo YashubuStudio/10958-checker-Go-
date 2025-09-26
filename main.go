@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type Expr struct {
@@ -38,6 +39,9 @@ type config struct {
 	target    *big.Rat
 }
 
+// 総計算回数（並列対応）
+var calcCount uint64
+
 func parseRat(s string) (*big.Rat, error) {
 	r := new(big.Rat)
 	if _, ok := r.SetString(s); ok {
@@ -60,21 +64,25 @@ func combineMaps(left, right map[string]Expr, maxExp int) map[string]Expr {
 			// +
 			{
 				v := new(big.Rat).Add(L.Val, R.Val)
+				atomic.AddUint64(&calcCount, 1)
 				addIfNew(out, v, fmt.Sprintf("(%s%s%s)", L.Repr, opAdd, R.Repr))
 			}
 			// -
 			{
 				v := new(big.Rat).Sub(L.Val, R.Val)
+				atomic.AddUint64(&calcCount, 1)
 				addIfNew(out, v, fmt.Sprintf("(%s%s%s)", L.Repr, opSub, R.Repr))
 			}
 			// *
 			{
 				v := new(big.Rat).Mul(L.Val, R.Val)
+				atomic.AddUint64(&calcCount, 1)
 				addIfNew(out, v, fmt.Sprintf("(%s%s%s)", L.Repr, opMul, R.Repr))
 			}
 			// /
 			if R.Val.Sign() != 0 {
 				v := new(big.Rat).Quo(L.Val, R.Val)
+				atomic.AddUint64(&calcCount, 1)
 				addIfNew(out, v, fmt.Sprintf("(%s%s%s)", L.Repr, opDiv, R.Repr))
 			}
 			// ^
@@ -82,6 +90,7 @@ func combineMaps(left, right map[string]Expr, maxExp int) map[string]Expr {
 				exp := int(R.Val.Num().Int64())
 				if abs(exp) <= maxExp {
 					if powVal, ok := powRat(L.Val, exp); ok {
+						atomic.AddUint64(&calcCount, 1)
 						addIfNew(out, powVal, fmt.Sprintf("(%s%s%s)", L.Repr, opPow, R.Repr))
 					}
 				}
@@ -315,6 +324,7 @@ func main() {
 		for i := 0; i < len(nears) && i < cfg.limit; i++ {
 			fmt.Printf("[%2d] %s = %s  (誤差 %.6g)\n", i+1, nears[i].expr, nears[i].val.RatString(), nears[i].diff)
 		}
+		fmt.Printf("\n総計算回数: %d\n", atomic.LoadUint64(&calcCount))
 		return
 	}
 
@@ -324,6 +334,7 @@ func main() {
 	for i := 0; i < len(candidates) && i < cfg.limit; i++ {
 		fmt.Printf("[%2d] %s = %s\n", i+1, candidates[i], cfg.targetStr)
 	}
+	fmt.Printf("\n総計算回数: %d\n", atomic.LoadUint64(&calcCount))
 }
 
 func absFloat(r *big.Rat) float64 {
